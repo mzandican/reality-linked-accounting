@@ -1,0 +1,23 @@
+[MASTER]
+# Ignore test directory
+ignore=tests
+
+[MESSAGES CONTROL]
+# Disable specific warnings
+disable=
+    C0114,  # missing-module-docstring
+    C0115,  # missing-class-docstring
+    C0116,  # missing-function-docstring
+    W0511,  # TODO comments
+    R0903,  # too-few-public-methods
+
+[FORMAT]
+max-line-length=100
+
+[BASIC]
+# Allow single letter variable names
+good-names=i,j,k,x,y,z,obs,c,ts,db
+
+[IMPORTS]
+# Allow relative imports
+allow-reexport-from-package=yes
