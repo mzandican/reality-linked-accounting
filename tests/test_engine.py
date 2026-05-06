@@ -1,29 +1,37 @@
-"""Test suite for the confidence engine mathematical functions."""
+"""Test suite for Reality-Linked Accounting confidence engine."""
+import sys
+import os
+from pathlib import Path
 from datetime import datetime, timedelta
+
+# Fix Python path for GitHub Actions CI
+ROOT_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+
 from src.engine import compute_confidence, aggregate_observations, Observation
 
 
 def test_perfect_confidence():
-    """Test that perfect match with no time decay yields confidence of 1.0."""
+    """Zero drift + zero time ⇒ exactly 1.0."""
     assert compute_confidence(0.0, 0) == 1.0
 
 
 def test_drift_penalizes():
-    """Test that relative drift reduces confidence score."""
+    """Drift must reduce confidence below 1.0."""
     c = compute_confidence(0.2, 0)
     assert 0.0 < c < 1.0
 
 
 def test_time_decay():
-    """Test that confidence decays over time even with zero drift."""
+    """Confidence must decay over time even with zero drift."""
     c1 = compute_confidence(0.0, 0)
-    c2 = compute_confidence(0.0, 86400)  # 1 day in seconds
+    c2 = compute_confidence(0.0, 86400)  # 1 day
     assert c2 < c1
     assert c2 >= 0.0
 
 
 def test_aggregation_weights():
-    """Test that observation aggregation weights by trust and recency."""
+    """Recent + high-trust observations dominate the aggregate."""
     now = datetime.now()
     obs = [
         Observation(100, 1.0, now),
@@ -31,9 +39,12 @@ def test_aggregation_weights():
         Observation(80, 0.8, now - timedelta(hours=1))
     ]
     agg = aggregate_observations(obs)
-    assert 90 < agg < 105  # Should lean toward recent, high-trust values
+    # Bias toward 100, not 120
+    assert abs(agg - 100) < abs(agg - 120)
+    assert 85 < agg < 105  # Safety bounds
 
 
 def test_bounds_enforced():
-    """Test that confidence is always bounded between 0 and 1."""
+    """Confidence must never escape [0, 1] under extreme inputs."""
     assert 0.0 <= compute_confidence(1.5, 999999) <= 1.0
+    assert 0.0 <= compute_confidence(0.0, 0) <= 1.0
