@@ -1,4 +1,4 @@
-"""Reality-Linked Accounting: Confidence & Aggregation Engine (Hardened)."""
+"""Reality-Linked Accounting: Confidence & Aggregation Engine (Stable)."""
 import math
 from datetime import datetime
 from dataclasses import dataclass
@@ -6,7 +6,9 @@ from typing import List, Optional
 from .config import EPSILON, DECAY_LAMBDA, DRIFT_PENALTY_K, DEFAULT_MATERIALITY
 
 
-# ---- Data Structures ----
+# -----------------------------
+# Data Structures
+# -----------------------------
 
 @dataclass
 class Observation:
@@ -24,7 +26,9 @@ class AssuranceResult:
     risk: float
 
 
-# ---- Core Math ----
+# -----------------------------
+# Confidence Function
+# -----------------------------
 
 def compute_confidence(
     drift: float,
@@ -33,43 +37,35 @@ def compute_confidence(
     k_drift: float = DRIFT_PENALTY_K,
 ) -> float:
     """
-    Stable confidence computation:
-    C = e^(-λt) * e^(-k·d_r)
+    C = exp(-λt) * exp(-k·drift)
+    Always bounded in [0,1]
     """
 
-    # Sanitize inputs
     drift = max(0.0, float(drift))
     age_seconds = max(0.0, float(age_seconds))
 
-    # Prevent overflow / underflow extremes
-    decay_exponent = -lambda_decay * age_seconds
-    drift_exponent = -k_drift * drift
+    # Prevent underflow
+    decay_exp = max(-lambda_decay * age_seconds, -700)
+    drift_exp = max(-k_drift * drift, -700)
 
-    # Clamp exponents to safe range
-    decay_exponent = max(decay_exponent, -700)   # exp(-700) ~ 5e-305
-    drift_exponent = max(drift_exponent, -700)
+    confidence = math.exp(decay_exp) * math.exp(drift_exp)
 
-    time_component = math.exp(decay_exponent)
-    drift_component = math.exp(drift_exponent)
-
-    confidence = time_component * drift_component
-
-    # Hard clamp
-    if confidence < 0.0:
-        return 0.0
-    if confidence > 1.0:
-        return 1.0
-    return confidence
+    return max(0.0, min(1.0, confidence))
 
 
-# ---- Aggregation ----
+# -----------------------------
+# Robust Aggregation (FIXED)
+# -----------------------------
 
 def aggregate_observations(
     observations: List[Observation],
     now: Optional[datetime] = None
 ) -> float:
     """
-    Deterministic aggregation with trust × recency weighting.
+    Robust aggregation using:
+    - trust weighting (squared for stronger penalty)
+    - recency decay
+    - weighted mean (no distortion)
     """
 
     if not observations:
@@ -84,24 +80,21 @@ def aggregate_observations(
         if obs is None:
             continue
 
-        # Sanitize trust
+        # Clamp trust
         trust = min(max(obs.trust, 0.0), 1.0)
 
-        # Compute age safely
-        age = (now - obs.timestamp).total_seconds()
+        # Stronger penalty on low trust
+        trust_weight = trust ** 2
 
-        # Guard against future timestamps
+        # Handle time safely
+        age = (now - obs.timestamp).total_seconds()
         age = max(0.0, age)
 
-        # Stable decay
-        exponent = -DECAY_LAMBDA * age
-        exponent = max(exponent, -700)
+        decay_exp = max(-DECAY_LAMBDA * age, -700)
+        recency_weight = math.exp(decay_exp)
 
-        recency_weight = math.exp(exponent)
+        weight = trust_weight * recency_weight
 
-        weight = trust * recency_weight
-
-        # Skip useless weights
         if weight <= 0.0:
             continue
 
@@ -114,7 +107,9 @@ def aggregate_observations(
     return weighted_sum / total_weight
 
 
-# ---- Full Pipeline ----
+# -----------------------------
+# Full Evaluation Pipeline
+# -----------------------------
 
 def evaluate_account(
     claimed: float,
@@ -123,25 +118,19 @@ def evaluate_account(
     materiality: float = DEFAULT_MATERIALITY,
     now: Optional[datetime] = None
 ) -> Optional[AssuranceResult]:
-    """
-    Full triple-state evaluation with deterministic time.
-    """
 
     now = now or datetime.utcnow()
 
     observed = aggregate_observations(observations, now=now)
 
-    # Stable drift (critical fix)
     denominator = max(abs(claimed), EPSILON)
     relative_drift = abs(claimed - observed) / denominator
 
-    # Time delta
     age = (now - last_verified).total_seconds()
     age = max(0.0, age)
 
     confidence = compute_confidence(relative_drift, age)
 
-    # Risk function (bounded + stable)
     risk = relative_drift * (1.0 - confidence) * max(materiality, 0.0)
 
     return AssuranceResult(
@@ -150,4 +139,4 @@ def evaluate_account(
         relative_drift=relative_drift,
         confidence=confidence,
         risk=risk,
-    )
+)
