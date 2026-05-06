@@ -1,3 +1,4 @@
+"""Reality-Linked Accounting: Confidence & Aggregation Engine."""
 import math
 from datetime import datetime
 from dataclasses import dataclass
@@ -18,31 +19,44 @@ class AssuranceResult:
     confidence: float
     risk: float
 
-def aggregate_observations(observations: List[Observation]) -> float | None:
+def compute_confidence(drift: float, age_seconds: float,
+                       lambda_decay: float = DECAY_LAMBDA,
+                       k_drift: float = DRIFT_PENALTY_K) -> float:
+    """
+    Compute confidence based on normalized drift and time decay.
+    C = e^(-λt) * e^(-k·d_r)  → strictly bounded [0, 1]
+    """
+    drift = max(0.0, drift)
+    age_seconds = max(0.0, age_seconds)
+
+    time_component = math.exp(-lambda_decay * age_seconds)
+    drift_component = math.exp(-k_drift * drift)
+
+    confidence = time_component * drift_component
+    return max(0.0, min(1.0, confidence))
+
+def aggregate_observations(observations: List[Observation]) -> float:
     """Weighted aggregation: trust × recency decay."""
     if not observations:
-        return None
+        return 0.0
 
+    now = datetime.now()
     weighted_sum = 0.0
     total_weight = 0.0
-    now = datetime.now()
 
     for obs in observations:
-        age_seconds = (now - obs.timestamp).total_seconds()
-        recency = math.exp(-0.0001 * age_seconds)  # Fast recency decay
-        weight = obs.trust * recency
-        weighted_sum += weight * obs.value
+        age = (now - obs.timestamp).total_seconds()
+        recency_weight = math.exp(-1e-5 * age)  # Consistent decay lambda
+        weight = obs.trust * recency_weight
+
+        weighted_sum += obs.value * weight
         total_weight += weight
 
-    return weighted_sum / total_weight if total_weight > 0 else None
+    return weighted_sum / total_weight if total_weight > 0 else 0.0
 
-def compute_confidence(relative_drift: float, time_delta_seconds: float) -> float:
-    """C = e^(-λt) × e^(-k × d_r) → bounded [0, 1]"""
-    time_factor = math.exp(-DECAY_LAMBDA * time_delta_seconds)
-    drift_factor = math.exp(-DRIFT_PENALTY_K * relative_drift)
-    return max(0.0, min(1.0, time_factor * drift_factor))
-
-def evaluate_account(claimed: float, observations: List[Observation], last_verified: datetime, materiality: float = DEFAULT_MATERIALITY) -> AssuranceResult | None:
+def evaluate_account(claimed: float, observations: List[Observation], 
+                     last_verified: datetime, materiality: float = DEFAULT_MATERIALITY) -> AssuranceResult | None:
+    """Full triple-state evaluation pipeline."""
     observed = aggregate_observations(observations)
     if observed is None:
         return None
@@ -58,4 +72,4 @@ def evaluate_account(claimed: float, observations: List[Observation], last_verif
         relative_drift=relative_drift,
         confidence=confidence,
         risk=risk
-    )
+                           )
